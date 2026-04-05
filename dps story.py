@@ -148,8 +148,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data.startswith("buy_"):
         index = int(data.split("_")[1])
         plan = PRICING_PLANS[index]
-        text = f"💳 **PAYMENT**\n{SEP}\nPlan: **{plan['title']}**\nUPI: `{UPI_ID}`\n
-[QR Code](https://files.catbox.moe/8g6guc.jpg)\n\n📸 Send screenshot here."
+        text = f"💳 **PAYMENT**\n{SEP}\nPlan: **{plan['title']}**\nUPI: `{UPI_ID}`\n[QR Code](https://files.catbox.moe/8g6guc.jpg)\n\n📸 Send screenshot here."
         keyboard = [[InlineKeyboardButton("⬅️ Back", callback_data=f"price_{index}")]]
         await query.edit_message_media(media=InputMediaPhoto(media=IMG_PAYMENT, caption=text, parse_mode="Markdown"), reply_markup=InlineKeyboardMarkup(keyboard))
 
