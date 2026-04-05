@@ -4,7 +4,7 @@ import time
 import requests
 from flask import Flask
 from datetime import datetime, timedelta
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -20,23 +20,25 @@ ADMIN_ID = 8323137024
 GROUP_CHAT_ID = -1003120753256
 UPI_ID = "padhand171@okicici" 
 
-# IMPORTANT: Replace this with your ACTUAL Render URL after you deploy
-RENDER_EXTERNAL_URL = "https://your-app-name.onrender.com"
+RENDER_EXTERNAL_URL = "https://des-story-tg.onrender.com"
 
 # Image Links
 IMG_MAIN = "https://files.catbox.moe/wdldpl.jpg" 
 IMG_ABOUT = "https://files.catbox.moe/65tg20.jpg"
 IMG_SUPPORT = "https://files.catbox.moe/prrij6.jpg"
-IMG_PRICING = "https://files.catbox.moe/hatjad.jpg"
+IMG_PRICING = "https://files.catbox.moe/3rd6b3.jpg"
 IMG_PAYMENT = "https://files.catbox.moe/l9xvvz.jpg"
+IMG_PLAN = "https://files.catbox.moe/wdldpl.jpg" # Image for /myplan
 
+# Database to store user subscriptions
+# Structure: {user_id: {"join_date": dt, "expiry_date": dt, "plan_name": str}}
 subscriptions = {}
 
 PRICING_PLANS = [
-    {"price": "₹99", "title": "🥉 BASIC", "desc": "• 1 month easy access to all stories\n• premium story access\n• serial-wise episodes \n• without any distubance", "style": "primary"},
-    {"price": "₹149", "title": "🥈 STANDARD", "desc": "• 2 month easy access to all stories\n• premium story access\n• serial-wise episodes \n• without any distubance"},
-    {"price": "₹299", "title": "🥇 PREMIUM", "desc": "• 5 month easy access to all stories\n• premium story access\n• serial-wise episodes \n• without any distubance", "style": "success"},
-    {"price": "Custom", "title": "💎 VIP", "desc": "• lifetime access to all stories\n• premium story access\n• serial-wise episodes \n• without any distubance\n• Custom Requests", "style": "danger"}
+    {"price": "99", "title": "🥉 BASIC", "desc": "• 1 month easy access\n• Premium stories\n• No disturbance"},
+    {"price": "149", "title": "🥈 STANDARD", "desc": "• 2 month easy access\n• Premium stories\n• No disturbance"},
+    {"price": "299", "title": "🥇 PREMIUM", "desc": "• 5 month easy access\n• Premium stories\n• No disturbance"},
+    {"price": "Custom", "title": "💎 VIP", "desc": "• Lifetime access\n• Custom Requests"}
 ]
 
 SEP = "━━━━━━━━━━━━━━━━━━"
@@ -48,18 +50,15 @@ flask_app = Flask('')
 
 @flask_app.route('/')
 def home():
-    return "Bot is running and awake!"
+    return "Bot is running!"
 
 def ping_self():
-    """Function to ping the server every 14 minutes to prevent Render from sleeping."""
-    time.sleep(30) # Wait for server to start
+    time.sleep(30)
     while True:
         try:
             requests.get(RENDER_EXTERNAL_URL)
-            logging.info("Self-ping successful: Staying alive.")
-        except Exception as e:
-            logging.error(f"Self-ping failed: {e}")
-        time.sleep(840) # 14 minutes
+        except: pass
+        time.sleep(840)
 
 def run_flask():
     flask_app.run(host='0.0.0.0', port=8080)
@@ -72,8 +71,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"{SEP}\n"
         f"Hello **{update.effective_user.first_name}**,\n"
         f"Step into the world of *Shunya Samrat*.\n\n"
-        f"Select an option below to begin your journey.\n"
-        f"[​​​​​​​​​​​]({IMG_MAIN})"
+        f"Select an option below to begin your journey."
     )
     
     keyboard = [
@@ -86,10 +84,39 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     
     reply_markup = InlineKeyboardMarkup(keyboard)
+    
     if update.message:
-        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+        await update.message.reply_photo(photo=IMG_MAIN, caption=text, reply_markup=reply_markup, parse_mode="Markdown")
     else:
-        await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+        await update.callback_query.edit_message_media(
+            media=InputMediaPhoto(media=IMG_MAIN, caption=text, parse_mode="Markdown"),
+            reply_markup=reply_markup
+        )
+
+async def myplan(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    
+    if user_id not in subscriptions:
+        await update.message.reply_text("❌ **No Active Plan Found.**\nUse /start to view our premium plans.")
+        return
+
+    sub = subscriptions[user_id]
+    join_dt = sub['join_date'].strftime("%Y-%m-%d")
+    expiry_dt = sub['expiry_date'].strftime("%Y-%m-%d")
+    remind_dt = (sub['expiry_date'] - timedelta(days=2)).strftime("%Y-%m-%d")
+    
+    text = (
+        f"👤 **YOUR SUBSCRIPTION**\n"
+        f"{SEP}\n"
+        f"🏷 Plan: **{sub['plan_name']}**\n"
+        f"📅 Joined: `{join_dt}`\n"
+        f"⏳ Expires: `{expiry_dt}`\n"
+        f"🔔 Renewal Reminder: `{remind_dt}`\n"
+        f"{SEP}\n"
+        f"Thank you for being a part of DPS Stories!"
+    )
+    
+    await update.message.reply_photo(photo=IMG_PLAN, caption=text, parse_mode="Markdown")
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -97,79 +124,43 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
 
     if data == "about":
-        text = (
-            f"📜 **OUR MISSION**\n"
-            f"{SEP}\n"
-            f"Bringing epic legends to life with premium Hindi translations and immersive audio experiences.\n"
-            f"[​​​​​​​​​​​]({IMG_ABOUT})"
-        )
+        text = f"📜 **OUR MISSION**\n{SEP}\nBringing epic legends to life with premium Hindi translations."
         keyboard = [[InlineKeyboardButton("⬅️ Back to Menu", callback_data="main")]]
-        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        await query.edit_message_media(media=InputMediaPhoto(media=IMG_ABOUT, caption=text, parse_mode="Markdown"), reply_markup=InlineKeyboardMarkup(keyboard))
 
     elif data == "connect":
-        text = (
-            f"📞 **LIVE HELPLINE**\n"
-            f"{SEP}\n"
-            f"Need help? Simply type your message below. Our support team will respond to you directly in this chat.\n"
-            f"[​​​​​​​​​​​]({IMG_SUPPORT})"
-        )
+        text = f"📞 **LIVE HELPLINE**\n{SEP}\nType your message below. Our support team will respond directly."
         keyboard = [[InlineKeyboardButton("🏠 Main Menu", callback_data="main")]]
-        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        await query.edit_message_media(media=InputMediaPhoto(media=IMG_SUPPORT, caption=text, parse_mode="Markdown"), reply_markup=InlineKeyboardMarkup(keyboard))
 
     elif data.startswith("price_"):
         index = int(data.split("_")[1])
         plan = PRICING_PLANS[index]
-        
-        text = (
-            f"⚡ **SELECT YOUR PLAN**\n"
-            f"{SEP}\n"
-            f"✨ **{plan['title']}**\n"
-            f"💰 Price: `{plan['price']}`\n\n"
-            f"{plan['desc']}\n"
-            f"{SEP}\n"
-            f"[​​​​​​​​​​​]({IMG_PRICING})"
-        )
+        text = f"⚡ **{plan['title']}**\n💰 Price: `₹{plan['price']}`\n\n{plan['desc']}"
         
         nav_row = []
-        if index > 0:
-            nav_row.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"price_{index-1}"))
-        if index < len(PRICING_PLANS) - 1:
-            nav_row.append(InlineKeyboardButton("Next ➡️", callback_data=f"price_{index+1}"))
+        if index > 0: nav_row.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"price_{index-1}"))
+        if index < len(PRICING_PLANS) - 1: nav_row.append(InlineKeyboardButton("Next ➡️", callback_data=f"price_{index+1}"))
             
-        keyboard = [
-            nav_row, 
-            [InlineKeyboardButton(f"💳 PURCHASE {plan['price']}", callback_data=f"buy_{index}")],
-            [InlineKeyboardButton("🏠 Main Menu", callback_data="main")]
-        ]
-        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        keyboard = [nav_row, [InlineKeyboardButton(f"💳 PURCHASE", callback_data=f"buy_{index}")], [InlineKeyboardButton("🏠 Main Menu", callback_data="main")]]
+        await query.edit_message_media(media=InputMediaPhoto(media=IMG_PRICING, caption=text, parse_mode="Markdown"), reply_markup=InlineKeyboardMarkup(keyboard))
 
     elif data.startswith("buy_"):
         index = int(data.split("_")[1])
         plan = PRICING_PLANS[index]
-        text = (
-            f"💳 **PAYMENT GATEWAY**\n"
-            f"{SEP}\n"
-            f"Plan: **{plan['title']}**\n"
-            f"Amount: `{plan['price']}`\n\n"
-            f"Scan the QR or pay to UPI ID:\n"
-            f"🆔 `{UPI_ID}`\n\n"
-            f"📸 **IMPORTANT:** Send the payment screenshot here for verification.\n"
-            f"[​​​​​​​​​​​]({IMG_PAYMENT})"
-        )
-        keyboard = [[InlineKeyboardButton("⬅️ Back to Plans", callback_data=f"price_{index}")]]
-        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        text = f"💳 **PAYMENT**\n{SEP}\nPlan: **{plan['title']}**\nUPI: `{UPI_ID}`\n
+[QR Code](https://files.catbox.moe/8g6guc.jpg)\n\n📸 Send screenshot here."
+        keyboard = [[InlineKeyboardButton("⬅️ Back", callback_data=f"price_{index}")]]
+        await query.edit_message_media(media=InputMediaPhoto(media=IMG_PAYMENT, caption=text, parse_mode="Markdown"), reply_markup=InlineKeyboardMarkup(keyboard))
 
     elif data.startswith("approve_"):
-        user_id = int(data.split("_")[1])
-        link = await context.bot.create_chat_invite_link(chat_id=GROUP_CHAT_ID, member_limit=1)
-        subscriptions[user_id] = datetime.now() + timedelta(minutes=1) 
-        await context.bot.send_message(chat_id=user_id, text=f"✅ **Verified!** Access granted.\n\nJoin here: {link.invite_link}")
-        await query.edit_message_text(text=f"🟢 User {user_id} Approved.")
+        user_id = data.split("_")[1]
+        await query.message.reply_text(f"✍️ **Admin, please reply to this message with the validity in days (e.g., 30) for User `{user_id}`**")
 
     elif data.startswith("dismiss_"):
         user_id = int(data.split("_")[1])
-        await context.bot.send_message(chat_id=user_id, text="❌ **Verification Failed**\nWe couldn't verify your payment. Please contact support if this is an error.")
-        await query.edit_message_text(text=f"🔴 User {user_id} Rejected.")
+        await context.bot.send_message(chat_id=user_id, text="❌ **Verification Failed.** Contact support.")
+        await query.edit_message_caption(caption=f"🔴 User {user_id} Rejected.")
 
     elif data == "main":
         await start(update, context)
@@ -178,58 +169,80 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def global_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
+    msg_text = update.message.text
 
+    # ADMIN LOGIC: Approval with validity entry
     if user_id == ADMIN_ID and update.message.reply_to_message:
-        try:
-            if update.message.reply_to_message.forward_origin:
-                target_id = update.message.reply_to_message.forward_origin.sender_user.id
-                await context.bot.send_message(chat_id=target_id, text=f"💬 **Support Response:**\n\n{update.message.text}")
-                await update.message.reply_text("✅ Reply sent to user.")
-            return
-        except Exception:
+        reply_msg = update.message.reply_to_message
+        
+        # Check if Admin is providing validity days
+        if "Admin, please reply" in reply_msg.text:
+            try:
+                days = int(msg_text)
+                # Extract target user ID from the prompt text
+                target_id = int(reply_msg.text.split("User `")[1].split("`")[0])
+                
+                # Update Subscription
+                expiry = datetime.now() + timedelta(days=days)
+                subscriptions[target_id] = {
+                    "join_date": datetime.now(),
+                    "expiry_date": expiry,
+                    "plan_name": f"{days} Days Access"
+                }
+                
+                link = await context.bot.create_chat_invite_link(chat_id=GROUP_CHAT_ID, member_limit=1)
+                await context.bot.send_message(chat_id=target_id, text=f"✅ **Verified!** Plan active until {expiry.strftime('%Y-%m-%d')}.\n\nJoin: {link.invite_link}")
+                await update.message.reply_text(f"🟢 User {target_id} approved for {days} days.")
+                return
+            except Exception as e:
+                await update.message.reply_text("⚠️ Please enter a valid number of days.")
+                return
+
+        # Admin Support Reply
+        if reply_msg.forward_origin:
+            target_id = reply_msg.forward_origin.sender_user.id
+            await context.bot.send_message(chat_id=target_id, text=f"💬 **Support:** {msg_text}")
+            await update.message.reply_text("✅ Reply sent.")
             return
 
+    # USER LOGIC: Sending payment screenshot
     if update.message.photo:
-        keyboard = [[
-            InlineKeyboardButton("✅ Approve", callback_data=f"approve_{user_id}"),
-            InlineKeyboardButton("❌ Reject", callback_data=f"dismiss_{user_id}")
-        ]]
-        await context.bot.send_message(chat_id=ADMIN_ID, text=f"🔔 **New Payment Proof**\nFrom User: `{user_id}`", reply_markup=InlineKeyboardMarkup(keyboard))
+        keyboard = [[InlineKeyboardButton("✅ Approve (Enter Days)", callback_data=f"approve_{user_id}"),
+                     InlineKeyboardButton("❌ Reject", callback_data=f"dismiss_{user_id}")]]
+        await context.bot.send_message(chat_id=ADMIN_ID, text=f"🔔 **Payment Proof**\nUser: `{user_id}`", reply_markup=InlineKeyboardMarkup(keyboard))
         await update.message.forward(chat_id=ADMIN_ID)
-        await update.message.reply_text("✅ **Screenshot Received!**\nPlease wait while our team verifies your payment.")
+        await update.message.reply_text("✅ **Screenshot Received!** Please wait for verification.")
         return
 
+    # Regular Support Forwarding
     if user_id != ADMIN_ID:
         await context.bot.forward_message(chat_id=ADMIN_ID, from_chat_id=update.message.chat_id, message_id=update.message.message_id)
 
 async def auto_remove_job(context: ContextTypes.DEFAULT_TYPE):
     now = datetime.now()
-    expired = [uid for uid, time in subscriptions.items() if now > time]
+    expired = [uid for uid, data in subscriptions.items() if now > data['expiry_date']]
     for uid in expired:
         try:
             await context.bot.ban_chat_member(chat_id=GROUP_CHAT_ID, user_id=uid)
             await context.bot.unban_chat_member(chat_id=GROUP_CHAT_ID, user_id=uid)
             del subscriptions[uid]
-            await context.bot.send_message(chat_id=uid, text="⌛ **Subscription Expired!**\nRenew your plan to continue listening.")
+            await context.bot.send_message(chat_id=uid, text="⌛ **Expired!** Renew your plan.")
         except: pass
 
 def main():
-    # 1. Start Flask in a background thread
     threading.Thread(target=run_flask, daemon=True).start()
-    
-    # 2. Start the self-pinging loop in a background thread
     threading.Thread(target=ping_self, daemon=True).start()
 
-    # 3. Start Telegram Bot
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("myplan", myplan))
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, global_handler))
     
     if app.job_queue:
-        app.job_queue.run_repeating(auto_remove_job, interval=10)
+        app.job_queue.run_repeating(auto_remove_job, interval=60)
     
-    print("Bot is running...")
+    print("Bot is live...")
     app.run_polling()
 
 if __name__ == "__main__":
