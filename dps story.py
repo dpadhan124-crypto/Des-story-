@@ -70,7 +70,7 @@ PRICING_PLANS = [
     }
 ]
 
-# 2. DATABASE / PERSISTENCE (Updated to SQLite)
+# 2. DATABASE / PERSISTENCE (SQLite)
 DB_FILE = "subscriptions.db"
 
 def init_db():
@@ -101,7 +101,6 @@ def load_data():
 
 def save_subscription(user_id, data):
     with sqlite3.connect(DB_FILE) as conn:
-        # ON CONFLICT DO UPDATE handles both new inserts and existing user updates
         conn.execute('''
             INSERT INTO subscriptions (user_id, user_name, plan_name, join_date, expiry_date)
             VALUES (?, ?, ?, ?, ?)
@@ -345,7 +344,8 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             success_text = f"🎉 **CONGRATULATIONS!**\nYour payment has been approved.\n\nPlan: **{plan['title']}**\nExpiry: `{expiry_str}`\n\nJoin the premium group here: {invite.invite_link}"
             await context.bot.send_message(target_uid, success_text, parse_mode="Markdown")
             
-            await query.edit_message_text(f"🟢 Approved user (`{target_uid}`) for {plan['title']}", parse_mode="Markdown")
+            # FIX: Use edit_message_caption instead of edit_message_text for photo messages
+            await query.edit_message_caption(f"🟢 Approved user (`{target_uid}`) for {plan['title']}", parse_mode="Markdown")
         except Exception as e:
             await query.answer(f"Error: {e}")
 
@@ -353,9 +353,11 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         target_uid = data.split("_")[1]
         try:
             await context.bot.send_message(target_uid, "🔴 **PAYMENT REJECTED**\nYour payment verification failed. Please contact support if this is an error.", parse_mode="Markdown")
-            await query.edit_message_text(f"🔴 User {target_uid} rejected.", parse_mode="Markdown")
-        except Exception:
-            pass
+            
+            # FIX: Use edit_message_caption instead of edit_message_text for photo messages
+            await query.edit_message_caption(f"🔴 User {target_uid} rejected.", parse_mode="Markdown")
+        except Exception as e:
+            await query.answer(f"Error: {e}")
 
     elif data == "main":
         first_name = query.from_user.first_name
@@ -520,3 +522,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
