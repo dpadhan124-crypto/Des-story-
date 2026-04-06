@@ -1,5 +1,2 @@
-pyrogram
-tgcrypto
+python-telegram-bot[job-queue]
 aiosqlite
-apscheduler
-aiohttp
