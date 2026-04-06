@@ -10,16 +10,15 @@ from pyrogram.enums import ChatMemberStatus
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from aiohttp import web
 
-# --- FILLED CONFIGURATION ---
-API_ID = 28515728
-API_HASH = "c8df3dfc2cb3cc6b0aa1b6ad6a0f8830"
-BOT_TOKEN = "8552684809:AAGSRPA-3k0huC9fKBAvJGGI-VYfDhe4RJQ"
-TARGET_GROUP_ID = -1003742470706
+# --- CONFIGURATION (Use Env Vars for security on Render) ---
+API_ID = int(os.getenv("API_ID", 28515728))
+API_HASH = os.getenv("API_HASH", "c8df3dfc2cb3cc6b0aa1b6ad6a0f8830")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8552684809:AAGSRPA-3k0huC9fKBAvJGGI-VYfDhe4RJQ")
+TARGET_GROUP_ID = int(os.getenv("TARGET_GROUP_ID", -1003742470706))
 ADMIN_IDS = [8323137024, 8205396055, 5855151459]
 
-# Render automatically provides this URL if you set it in the dashboard, 
-# otherwise, use your literal URL:
-RENDER_URL = "https://des-story-tg.onrender.com/"
+# Render URL for self-pinging
+RENDER_URL = os.getenv("RENDER_URL", "https://des-story-tg.onrender.com/")
 
 DB_NAME = "bot_data.db"
 app = Client("my_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
@@ -33,7 +32,6 @@ async def start_web_server():
     server.add_routes([web.get('/', handle_ping)])
     runner = web.AppRunner(server)
     await runner.setup()
-    # Render uses port 8080 by default for web services
     port = int(os.getenv("PORT", "8080"))
     site = web.TCPSite(runner, '0.0.0.0', port)
     await site.start()
@@ -102,6 +100,7 @@ async def forwarder(_, message: Message):
         print(f"Forwarding failed: {e}")
 
 async def clean_old_members(client, channel_ids):
+    # Use UTC for consistency
     limit = datetime.utcnow() - timedelta(days=7)
     for cid in channel_ids:
         print(f"Cleaning channel {cid}...")
@@ -154,14 +153,21 @@ async def start():
     sch = AsyncIOScheduler()
     # Runs at 2:30 AM every day
     sch.add_job(auto_job, "cron", hour=2, minute=30) 
-    # Pings the URL every 10 minutes to stay alive
+    # Pings the URL every 10 minutes to prevent Render from sleeping
     sch.add_job(ping_self, "interval", minutes=10)   
     sch.start()
     
     print("Bot starting...")
+    # Start the Pyrogram client
     await app.start()
     print("Bot is alive and running!")
+    
+    # Keeps the script alive indefinitely
     await asyncio.Event().wait()
 
 if __name__ == "__main__":
-    asyncio.run(start())
+    try:
+        asyncio.run(start())
+    except KeyboardInterrupt:
+        pass
+
