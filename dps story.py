@@ -1,5 +1,6 @@
 import os
 import json
+import sqlite3
 import asyncio
 import threading
 import time
@@ -69,21 +70,57 @@ PRICING_PLANS = [
     }
 ]
 
-# 2. DATABASE / PERSISTENCE
-DB_FILE = "subscriptions.json"
+# 2. DATABASE / PERSISTENCE (Updated to SQLite)
+DB_FILE = "subscriptions.db"
+
+def init_db():
+    with sqlite3.connect(DB_FILE) as conn:
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS subscriptions (
+                user_id TEXT PRIMARY KEY,
+                user_name TEXT,
+                plan_name TEXT,
+                join_date TEXT,
+                expiry_date TEXT
+            )
+        ''')
 
 def load_data():
-    if os.path.exists(DB_FILE):
-        with open(DB_FILE, "r") as f:
-            data = json.load(f)
-            # Convert string dates back to datetime objects where needed if necessary
-            # For simplicity, we'll keep them as strings in the dict and convert on use
-            return data
-    return {}
+    init_db()
+    subs = {}
+    with sqlite3.connect(DB_FILE) as conn:
+        cursor = conn.execute("SELECT user_id, user_name, plan_name, join_date, expiry_date FROM subscriptions")
+        for row in cursor:
+            subs[str(row[0])] = {
+                "user_name": row[1],
+                "plan_name": row[2],
+                "join_date": row[3],
+                "expiry_date": row[4]
+            }
+    return subs
 
-def save_data(data):
-    with open(DB_FILE, "w") as f:
-        json.dump(data, f, indent=4)
+def save_subscription(user_id, data):
+    with sqlite3.connect(DB_FILE) as conn:
+        # ON CONFLICT DO UPDATE handles both new inserts and existing user updates
+        conn.execute('''
+            INSERT INTO subscriptions (user_id, user_name, plan_name, join_date, expiry_date)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                user_name=excluded.user_name,
+                plan_name=excluded.plan_name,
+                join_date=excluded.join_date,
+                expiry_date=excluded.expiry_date
+        ''', (
+            str(user_id), 
+            data.get('user_name', 'Unknown'), 
+            data.get('plan_name', 'N/A'), 
+            data.get('join_date', ''), 
+            data.get('expiry_date', '')
+        ))
+
+def delete_subscription(user_id):
+    with sqlite3.connect(DB_FILE) as conn:
+        conn.execute("DELETE FROM subscriptions WHERE user_id = ?", (str(user_id),))
 
 subscriptions = load_data()
 
@@ -294,15 +331,14 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         expiry = datetime.now() + timedelta(days=plan["days"])
         expiry_str = expiry.strftime("%Y-%m-%d %H:%M:%S")
         
-        # Get user info from context or previous message if possible, or just use ID
-        # For simplicity, we'll store what we have
+        # Save to memory and then SQLite database
         subscriptions[target_uid] = {
             "join_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "expiry_date": expiry_str,
             "plan_name": plan["title"],
             "user_name": "Unknown" # Ideally fetch from message
         }
-        save_data(subscriptions)
+        save_subscription(target_uid, subscriptions[target_uid])
         
         try:
             invite = await context.bot.create_chat_invite_link(GROUP_CHAT_ID, member_limit=1)
@@ -362,7 +398,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         "plan_name": "Manual Extension",
                         "user_name": "Unknown"
                     }
-                save_data(subscriptions)
+                save_subscription(target_uid, subscriptions[target_uid])
                 
                 await update.message.reply_text(f"✅ **Updated Successfully!**\nUser: `{target_uid}`\nNew Expiry: `{expiry_str}`", parse_mode="Markdown")
                 await context.bot.send_message(target_uid, f"🎉 **Your premium validity has been manually extended!**\nNew Expiry: `{expiry_str}`", parse_mode="Markdown")
@@ -455,7 +491,7 @@ async def auto_remove_expired(context: ContextTypes.DEFAULT_TYPE):
             await context.bot.unban_chat_member(GROUP_CHAT_ID, int(uid))
             
             del subscriptions[uid]
-            save_data(subscriptions)
+            delete_subscription(uid)
             
             await context.bot.send_message(uid, "⌛ **Your premium access has expired!**\nRenew your plan via /start to regain access.", parse_mode="Markdown")
         except Exception:
