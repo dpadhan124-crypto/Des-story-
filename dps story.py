@@ -121,7 +121,7 @@ async def send_force_sub_prompt(update: Update, context: ContextTypes.DEFAULT_TY
         await update.callback_query.message.reply_text(text, reply_markup=reply_markup, parse_mode="Markdown")
 
 async def send_main_menu(chat_id: int, first_name: str, context: ContextTypes.DEFAULT_TYPE):
-    text = f"👑 **DPS STORIES PREMIUM** 👑\n{SEP}\nHello **{first_name}**,\nExperience the ultimate premium audio journey.\n\nSelect an option below to begin."
+    text = f"👑 **OLD/COMPLETE STORY** 👑\n{SEP}\nHello **{first_name}**,\nExperience the ultimate premium audio journey.\n\nSelect an option below to begin."
     keyboard = [
         [InlineKeyboardButton("🎧 PREMIUM AUDIO PLANS 🎧", callback_data="price_0")],
         [InlineKeyboardButton("📖 About Us", callback_data="about"), InlineKeyboardButton("💬 Support", callback_data="connect")],
@@ -137,7 +137,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await send_force_sub_prompt(update, context)
         return
 
-    text = f"👑 **DPS STORIES PREMIUM** 👑\n{SEP}\nHello **{update.effective_user.first_name}**,\nExperience the ultimate premium audio journey.\n\nSelect an option below to begin."
+    text = f"👑 **OLD/COMPLETE STORY PREMIUM** 👑\n{SEP}\nHello **{update.effective_user.first_name}**,\nExperience the ultimate premium audio journey.\n\nSelect an option below to begin."
     keyboard = [
         [InlineKeyboardButton("🎧 PREMIUM AUDIO PLANS 🎧", callback_data="price_0")],
         [InlineKeyboardButton("📖 About Us", callback_data="about"), InlineKeyboardButton("💬 Support", callback_data="connect")],
@@ -250,7 +250,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     elif data == "about":
-        text = f"📜 **OUR MISSION**\n{SEP}\nBringing epic legends to life with premium Audio translations."
+        # Defining a separator line (you can change this to whatever you like)
+SEP = "━━━━━━━━━━━━━━━━━━━━"
+
+# Your complete formatted text
+Text = f"📜 **OUR MISSION**\n{SEP}\n● We collect and share complete audio stories from multiple different apps and websites so you can find them all in one spot.\n● You get access to the full, uninterrupted versions of both old classics and brand-new releases.\n● Enjoy a seamless listening experience without needing to switch between different platforms to hear your favorite content.\n\nbot developed by @D_Padhan"
+
+print(Text)
+
         keyboard = [[InlineKeyboardButton("⬅️ Back to Menu", callback_data="main")]]
         await query.edit_message_media(media=InputMediaPhoto(media=IMG_ABOUT, caption=text, parse_mode="Markdown"), reply_markup=InlineKeyboardMarkup(keyboard))
 
