@@ -1,8 +1,9 @@
 import asyncio
 import logging
 import time
-from datetime import timedelta
+import os
 import aiosqlite
+from aiohttp import web
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -16,27 +17,51 @@ from telegram.ext import (
 from telegram.error import RetryAfter, BadRequest, Forbidden
 
 # ==============================================================================
-# CRUCIAL CONFIGURATION VARIABLES - Edit these as needed
+# CONFIGURATION VARIABLES
 # ==============================================================================
-BOT_TOKEN = '8749988449:AAHYIa8axAcH6zToYLg7y3ElexBAN8aQp90'  # Replace with your actual bot token from @BotFather
-ADMIN_ID = [8323137024, 8205396055, 5855151459]         # Replace with your numeric Telegram User ID
-TIME_THRESHOLD = timedelta(minutes=10) # e.g., timedelta(minutes=5) (days=7)for testing
-DB_NAME = 'channel_admin_bot.db'
-# ==============================================================================
+# Please change this to your new token once you revoke the leaked one!
+BOT_TOKEN = os.environ.get('BOT_TOKEN', '8749988449:AAGROgxIJbDMTJJE5AOBki8TvLC74QjPhLo') 
 
-# Enable logging
+# Parses comma-separated IDs from Render Env variables, or uses your default list
+admin_env = os.environ.get('ADMIN_IDS', '8323137024, 8205396055, 5855151459')
+ADMIN_IDS = [int(x.strip()) for x in admin_env.split(',')]
+
+DB_NAME = 'channel_admin_bot.db'
+
+# ==============================================================================
+# LOGGING SETUP
+# ==============================================================================
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
 logger = logging.getLogger(__name__)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+
+# ==============================================================================
+# KEEP-ALIVE WEB SERVER (For Render 24/7 Uptime)
+# ==============================================================================
+async def web_server_handler(request):
+    return web.Response(text="Bot is running 24/7!")
+
+async def start_web_server():
+    app = web.Application()
+    app.router.add_get('/', web_server_handler)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    
+    port = int(os.environ.get("PORT", 8080))
+    site = web.TCPSite(runner, '0.0.0.0', port)
+    await site.start()
+    logger.info(f"Keep-alive web server started on port {port}")
+
+async def post_init(application: Application):
+    asyncio.create_task(start_web_server())
 
 # ==============================================================================
 # DATABASE SETUP & HELPERS
 # ==============================================================================
 async def init_db():
-    """Initializes the SQLite database asynchronously."""
     async with aiosqlite.connect(DB_NAME) as db:
-        # Track active users in channels
         await db.execute("""
             CREATE TABLE IF NOT EXISTS tracked_users (
                 channel_id INTEGER,
@@ -45,14 +70,12 @@ async def init_db():
                 PRIMARY KEY (channel_id, user_id)
             )
         """)
-        # Track which channels the bot is an admin in
         await db.execute("""
             CREATE TABLE IF NOT EXISTS active_channels (
                 channel_id INTEGER PRIMARY KEY,
                 channel_name TEXT
             )
         """)
-        # Track global statistics (like total kicked)
         await db.execute("""
             CREATE TABLE IF NOT EXISTS bot_stats (
                 key TEXT PRIMARY KEY,
@@ -60,16 +83,15 @@ async def init_db():
             )
         """)
         await db.execute("INSERT OR IGNORE INTO bot_stats (key, value) VALUES ('total_kicked', 0)")
+        await db.execute("INSERT OR IGNORE INTO bot_stats (key, value) VALUES ('time_threshold', 604800)")
         await db.commit()
 
 # ==============================================================================
 # EVENT HANDLERS
 # ==============================================================================
 async def track_bot_channels(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Tracks when the bot is added or removed as an admin from a channel."""
     result = update.my_chat_member
-    if not result or result.chat.type != "channel":
-        return
+    if not result or result.chat.type != "channel": return
 
     chat_id = result.chat.id
     chat_name = result.chat.title
@@ -78,24 +100,20 @@ async def track_bot_channels(update: Update, context: ContextTypes.DEFAULT_TYPE)
     async with aiosqlite.connect(DB_NAME) as db:
         if new_status == "administrator":
             await db.execute("INSERT OR REPLACE INTO active_channels (channel_id, channel_name) VALUES (?, ?)", (chat_id, chat_name))
-            logger.info(f"Bot added as admin to channel: {chat_name} ({chat_id})")
+            logger.info(f"Bot added as admin to: {chat_name}")
         elif new_status in ["left", "kicked"]:
             await db.execute("DELETE FROM active_channels WHERE channel_id = ?", (chat_id,))
-            # Optionally remove all tracked users for this channel to save space
             await db.execute("DELETE FROM tracked_users WHERE channel_id = ?", (chat_id,))
-            logger.info(f"Bot removed from channel: {chat_name} ({chat_id})")
+            logger.info(f"Bot removed from: {chat_name}")
         await db.commit()
 
 async def track_user_joins(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Tracks when a user joins a channel the bot is administering."""
     result = update.chat_member
-    if not result or result.chat.type != "channel":
-        return
+    if not result or result.chat.type != "channel": return
 
     old_status = result.old_chat_member.status
     new_status = result.new_chat_member.status
 
-    # If the user transitioned from not being a member to being a member
     if old_status in ["left", "kicked"] and new_status == "member":
         chat_id = result.chat.id
         user_id = result.new_chat_member.user.id
@@ -107,46 +125,41 @@ async def track_user_joins(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 (chat_id, user_id, current_time)
             )
             await db.commit()
-        logger.info(f"New user {user_id} joined channel {chat_id} at {current_time}.")
 
 # ==============================================================================
 # CORE KICK LOGIC & SCHEDULER
 # ==============================================================================
 async def kick_user_with_retry(bot, channel_id, user_id, max_retries=3) -> bool:
-    """Attempts to kick a user. Handles API rate limits safely."""
     for attempt in range(max_retries):
         try:
-            # In Telegram, to 'remove' a user from a channel, you ban then unban them.
             await bot.ban_chat_member(chat_id=channel_id, user_id=user_id)
             await bot.unban_chat_member(chat_id=channel_id, user_id=user_id)
-            logger.info(f"Successfully kicked user {user_id} from {channel_id}.")
             return True
         except RetryAfter as e:
-            logger.warning(f"Rate limited by Telegram API! Sleeping for {e.retry_after}s.")
+            logger.warning(f"Rate limited! Sleeping for {e.retry_after}s.")
             await asyncio.sleep(e.retry_after)
-        except (BadRequest, Forbidden) as e:
-            # This happens if bot loses admin rights, or user already left/was deleted
-            logger.error(f"Failed to kick user {user_id} from {channel_id}: {e}")
+        except (BadRequest, Forbidden):
             return False
         except Exception as e:
-            logger.error(f"Unexpected error while kicking: {e}")
+            logger.error(f"Unexpected error: {e}")
             return False
     return False
 
 async def cleanup_job(context: ContextTypes.DEFAULT_TYPE, manual=False):
-    """Scans the database and kicks users who exceeded the time threshold."""
     bot = context.bot
     current_time = time.time()
-    threshold_seconds = current_time - TIME_THRESHOLD.total_seconds()
-    
     kicked_count_this_run = 0
 
     async with aiosqlite.connect(DB_NAME) as db:
-        # Fetch users who have been in the channel longer than the threshold
+        async with db.execute("SELECT value FROM bot_stats WHERE key = 'time_threshold'") as cur:
+            threshold_seconds_duration = (await cur.fetchone())[0]
+            
+        threshold_timestamp = current_time - threshold_seconds_duration
+
         db.row_factory = aiosqlite.Row
         async with db.execute(
             "SELECT channel_id, user_id FROM tracked_users WHERE join_time < ?", 
-            (threshold_seconds,)
+            (threshold_timestamp,)
         ) as cursor:
             users_to_kick = await cursor.fetchall()
 
@@ -154,10 +167,8 @@ async def cleanup_job(context: ContextTypes.DEFAULT_TYPE, manual=False):
             channel_id = row['channel_id']
             user_id = row['user_id']
             
-            # Execute the kick
             success = await kick_user_with_retry(bot, channel_id, user_id)
             
-            # Remove from DB whether successful or if it failed due to permissions (cleanup DB)
             await db.execute(
                 "DELETE FROM tracked_users WHERE channel_id = ? AND user_id = ?", 
                 (channel_id, user_id)
@@ -167,16 +178,15 @@ async def cleanup_job(context: ContextTypes.DEFAULT_TYPE, manual=False):
                 kicked_count_this_run += 1
                 await db.execute("UPDATE bot_stats SET value = value + 1 WHERE key = 'total_kicked'")
             
-            # Small artificial delay to prevent hitting base API limits across 350 channels
             await asyncio.sleep(0.05) 
             
         await db.commit()
     
-    if manual and kicked_count_this_run > 0:
+    if manual:
         logger.info(f"Manual cleanup finished. Kicked {kicked_count_this_run} users.")
 
 # ==============================================================================
-# ADMIN UI INTERFACE (DM ONLY)
+# ADMIN UI INTERFACE & COMMANDS
 # ==============================================================================
 def get_main_menu_keyboard():
     keyboard = [
@@ -187,24 +197,58 @@ def get_main_menu_keyboard():
     return InlineKeyboardMarkup(keyboard)
 
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handles the /start command in private messages."""
-    user_id = update.effective_user.id
-    if user_id != ADMIN_ID:
-        return # Ignore everyone else
-
+    # UPDATED: Check if user is in the list of ADMIN_IDS
+    if update.effective_user.id not in ADMIN_IDS: return
+    
     await update.message.reply_text(
         "👋 Welcome to the Channel Admin Manager Bot.\n\n"
-        "Please select an option below:",
-        reply_markup=get_main_menu_keyboard()
+        "Use `/dps <unit> <value>` to set the timer.\n"
+        "*(Example: `/dps days 30`, `/dps minutes 5`)*\n\n"
+        "Or use the menu below:",
+        reply_markup=get_main_menu_keyboard(),
+        parse_mode="Markdown"
     )
 
+async def dps_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # UPDATED: Check if user is in the list of ADMIN_IDS
+    if update.effective_user.id not in ADMIN_IDS: return
+
+    args = context.args
+    if len(args) != 2:
+        await update.message.reply_text(
+            "⚠️ **Invalid Format**\nUsage: `/dps <unit> <value>`\nExamples: `/dps days 30`, `/dps minutes 5`, `/dps hours 12`", 
+            parse_mode="Markdown"
+        )
+        return
+
+    unit = args[0].lower()
+    try:
+        value = int(args[1])
+    except ValueError:
+        await update.message.reply_text("⚠️ The value must be a number.")
+        return
+
+    if unit in ['day', 'days']: seconds = value * 24 * 3600
+    elif unit in ['hour', 'hours']: seconds = value * 3600
+    elif unit in ['minute', 'minutes', 'min', 'mins']: seconds = value * 60
+    elif unit in ['second', 'seconds', 'sec']: seconds = value
+    else:
+        await update.message.reply_text("⚠️ Unknown unit. Use `days`, `hours`, `minutes`, or `seconds`.", parse_mode="Markdown")
+        return
+
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute("UPDATE bot_stats SET value = ? WHERE key = 'time_threshold'", (seconds,))
+        await db.commit()
+
+    await update.message.reply_text(f"✅ Auto-kick timer successfully updated to **{value} {unit}**.", parse_mode="Markdown")
+
+
 async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handles inline keyboard button presses."""
     query = update.callback_query
-    user_id = query.from_user.id
     
-    if user_id != ADMIN_ID:
-        await query.answer("You are not authorized to use this bot.", show_alert=True)
+    # UPDATED: Check if user is in the list of ADMIN_IDS
+    if query.from_user.id not in ADMIN_IDS:
+        await query.answer("Not authorized.", show_alert=True)
         return
 
     await query.answer()
@@ -228,64 +272,57 @@ async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
         await query.edit_message_text(text, parse_mode='Markdown', reply_markup=get_main_menu_keyboard())
 
     elif data == 'menu_timer':
-        days = TIME_THRESHOLD.days
-        seconds = TIME_THRESHOLD.seconds
-        hours = seconds // 3600
-        minutes = (seconds % 3600) // 60
+        async with aiosqlite.connect(DB_NAME) as db:
+            async with db.execute("SELECT value FROM bot_stats WHERE key = 'time_threshold'") as cur:
+                total_seconds = (await cur.fetchone())[0]
+
+        days = total_seconds // (24 * 3600)
+        remaining = total_seconds % (24 * 3600)
+        hours = remaining // 3600
+        minutes = (remaining % 3600) // 60
+        secs = remaining % 60
         
         time_str = []
         if days > 0: time_str.append(f"{days} days")
         if hours > 0: time_str.append(f"{hours} hours")
         if minutes > 0: time_str.append(f"{minutes} minutes")
-        if not time_str: time_str.append(f"{seconds} seconds")
+        if secs > 0 or not time_str: time_str.append(f"{secs} seconds")
         
         text = (
             "⚙️ **Current Timer Configuration**\n\n"
             f"Users are kicked after: **{', '.join(time_str)}**\n\n"
-            "*To change this, edit the `TIME_THRESHOLD` variable in the script and restart.*"
+            "*To change this, send a command like:*\n`/dps days 30`"
         )
         await query.edit_message_text(text, parse_mode='Markdown', reply_markup=get_main_menu_keyboard())
 
     elif data == 'menu_cleanup':
         await query.edit_message_text(
-            "🧹 Manual cleanup triggered. The bot is now scanning the database in the background...",
+            "🧹 Manual cleanup triggered. Scanning database...",
             reply_markup=get_main_menu_keyboard()
         )
-        # Trigger the job asynchronously without waiting for it to finish in the UI
         asyncio.create_task(cleanup_job(context, manual=True))
 
-
 # ==============================================================================
-# MAIN APPLICATION SETUP
+# MAIN 
 # ==============================================================================
 def main():
-    """Builds and runs the bot."""
-    # Ensure event loop compatibility for aiosqlite setup on boot
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     loop.run_until_complete(init_db())
 
-    # Create the application
-    application = Application.builder().token(BOT_TOKEN).build()
+    application = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
 
-    # Track Bot joining/leaving channels
     application.add_handler(ChatMemberHandler(track_bot_channels, ChatMemberHandler.MY_CHAT_MEMBER))
-    
-    # Track Users joining channels
     application.add_handler(ChatMemberHandler(track_user_joins, ChatMemberHandler.CHAT_MEMBER))
-
-    # Admin Private UI Handlers
+    
     application.add_handler(CommandHandler("start", start_cmd, filters=filters.ChatType.PRIVATE))
+    application.add_handler(CommandHandler("dps", dps_cmd, filters=filters.ChatType.PRIVATE))
     application.add_handler(CallbackQueryHandler(menu_callback_handler))
 
-    # Setup the background scheduler loop (runs every 60 seconds)
     job_queue = application.job_queue
     job_queue.run_repeating(cleanup_job, interval=60, first=10)
 
-    logger.info("Bot is starting up...")
-    
-    # Start polling
-    # Allowed updates restricts events to only what we need to minimize API bandwidth across 350 channels
+    logger.info("Bot is polling...")
     application.run_polling(allowed_updates=[Update.MESSAGE, Update.CHAT_MEMBER, Update.MY_CHAT_MEMBER, Update.CALLBACK_QUERY])
 
 if __name__ == "__main__":
