@@ -3,15 +3,20 @@ import asyncio
 import aiosqlite
 import aiohttp
 from datetime import datetime, timedelta
-from pyrogram import Client, filters
+
+# --- CRITICAL FIX FOR PYTHON 3.14 ---
+# We import from pyrogram.client instead of just pyrogram 
+# to avoid the 'sync' wrapper crash.
+from pyrogram.client import Client
+from pyrogram import filters
 from pyrogram.types import Message, ChatMemberUpdated
 from pyrogram.errors import FloodWait
 from pyrogram.enums import ChatMemberStatus
+
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from aiohttp import web
 
 # --- CONFIGURATION ---
-# Using .get() with defaults to prevent crashes if Env Vars are missing
 API_ID = int(os.getenv("API_ID", 28515728))
 API_HASH = os.getenv("API_HASH", "c8df3dfc2cb3cc6b0aa1b6ad6a0f8830")
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8552684809:AAGSRPA-3k0huC9fKBAvJGGI-VYfDhe4RJQ")
@@ -20,6 +25,8 @@ ADMIN_IDS = [8323137024, 8205396055, 5855151459]
 RENDER_URL = os.getenv("RENDER_URL", "https://des-story-tg.onrender.com/")
 
 DB_NAME = "bot_data.db"
+
+# Initialize client normally
 app = Client("my_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
 # --- KEEP ALIVE LOGIC ---
@@ -31,15 +38,13 @@ async def start_web_server():
     server.add_routes([web.get('/', handle_ping)])
     runner = web.AppRunner(server)
     await runner.setup()
-    # Render requires binding to 0.0.0.0 and the PORT env var
     port = int(os.getenv("PORT", "8080"))
     site = web.TCPSite(runner, '0.0.0.0', port)
     await site.start()
     print(f"Web server started on port {port}")
 
 async def ping_self():
-    if "onrender.com" not in RENDER_URL:
-        return
+    if "onrender.com" not in RENDER_URL: return
     async with aiohttp.ClientSession() as session:
         try:
             async with session.get(RENDER_URL) as resp:
@@ -107,7 +112,6 @@ async def auto_job():
             rows = await c.fetchall()
             ids = [r[0] for r in rows]
             if ids:
-                # Basic cleanup logic
                 limit = datetime.utcnow() - timedelta(days=7)
                 for cid in ids:
                     try:
@@ -120,8 +124,7 @@ async def auto_job():
                                 await asyncio.sleep(1)
                     except FloodWait as e:
                         await asyncio.sleep(e.value)
-                    except Exception:
-                        continue
+                    except: continue
 
 # --- ADMIN COMMANDS ---
 @app.on_message(filters.command("stack") & filters.user(ADMIN_IDS))
@@ -140,7 +143,7 @@ async def manual_clean(_, m: Message):
     await m.reply("Starting manual cleanup in the background...")
     asyncio.create_task(auto_job())
 
-# --- STARTUP ---
+# --- MAIN STARTUP ---
 async def main():
     await init_db()
     await start_web_server()
@@ -152,12 +155,15 @@ async def main():
     
     print("Starting Pyrogram Client...")
     await app.start()
-    print("Bot is fully operational!")
+    print("Bot is alive!")
     await asyncio.Event().wait()
 
 if __name__ == "__main__":
+    # Workaround: explicitly create the loop before doing anything
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     try:
-        asyncio.run(main())
+        loop.run_until_complete(main())
     except (KeyboardInterrupt, SystemExit):
         pass
 
