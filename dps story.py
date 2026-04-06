@@ -17,7 +17,7 @@ from telegram.ext import (
 )
 
 # --- 1. CONFIGURATION ---
-BOT_TOKEN = "8552684809:AAGSRPA-3k0huC9fKBAvJGGI-VYfDhe4RJQ"
+BOT_TOKEN = "8749988449:AAEbL0VXE1K3mHUZF4hWZI7h-imXpoj_8kY"
 ADMIN_ID = (8323137024, 8205396055, 5855151459) # Tuple of Admin IDs
 ADMIN_NAME = "Mota bhi" 
 ADMIN_USERNAME = "YourUsername" # Your TG Username without @
