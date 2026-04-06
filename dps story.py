@@ -19,7 +19,7 @@ from telegram.error import RetryAfter, BadRequest, Forbidden
 # ==============================================================================
 # CONFIGURATION VARIABLES
 # ==============================================================================
-# Please change this to your new token once you revoke the leaked one!
+# REMEMBER TO REVOKE THIS TOKEN AFTER DEPLOYMENT AND UPDATE IT IN RENDER!
 BOT_TOKEN = os.environ.get('BOT_TOKEN', '8749988449:AAGROgxIJbDMTJJE5AOBki8TvLC74QjPhLo') 
 
 # Parses comma-separated IDs from Render Env variables, or uses your default list
@@ -35,32 +35,39 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
 logger = logging.getLogger(__name__)
+
+# Silence the spammy httpx logs from python-telegram-bot
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
 # ==============================================================================
 # KEEP-ALIVE WEB SERVER (For Render 24/7 Uptime)
 # ==============================================================================
 async def web_server_handler(request):
+    """Answers incoming HTTP pings to keep the bot awake."""
     return web.Response(text="Bot is running 24/7!")
 
 async def start_web_server():
+    """Starts a minimal web server asynchronously."""
     app = web.Application()
     app.router.add_get('/', web_server_handler)
     runner = web.AppRunner(app)
     await runner.setup()
     
+    # Render assigns a dynamic port, defaulting to 8080 locally
     port = int(os.environ.get("PORT", 8080))
     site = web.TCPSite(runner, '0.0.0.0', port)
     await site.start()
     logger.info(f"Keep-alive web server started on port {port}")
 
 async def post_init(application: Application):
+    """Runs automatically when the bot starts to boot up the web server."""
     asyncio.create_task(start_web_server())
 
 # ==============================================================================
 # DATABASE SETUP & HELPERS
 # ==============================================================================
 async def init_db():
+    """Initializes the SQLite database asynchronously."""
     async with aiosqlite.connect(DB_NAME) as db:
         await db.execute("""
             CREATE TABLE IF NOT EXISTS tracked_users (
@@ -83,6 +90,8 @@ async def init_db():
             )
         """)
         await db.execute("INSERT OR IGNORE INTO bot_stats (key, value) VALUES ('total_kicked', 0)")
+        
+        # Default timer is 7 days (604800 seconds) if not set yet
         await db.execute("INSERT OR IGNORE INTO bot_stats (key, value) VALUES ('time_threshold', 604800)")
         await db.commit()
 
@@ -91,7 +100,8 @@ async def init_db():
 # ==============================================================================
 async def track_bot_channels(update: Update, context: ContextTypes.DEFAULT_TYPE):
     result = update.my_chat_member
-    if not result or result.chat.type != "channel": return
+    if not result or result.chat.type != "channel":
+        return
 
     chat_id = result.chat.id
     chat_name = result.chat.title
@@ -109,7 +119,8 @@ async def track_bot_channels(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 async def track_user_joins(update: Update, context: ContextTypes.DEFAULT_TYPE):
     result = update.chat_member
-    if not result or result.chat.type != "channel": return
+    if not result or result.chat.type != "channel":
+        return
 
     old_status = result.old_chat_member.status
     new_status = result.new_chat_member.status
@@ -151,6 +162,7 @@ async def cleanup_job(context: ContextTypes.DEFAULT_TYPE, manual=False):
     kicked_count_this_run = 0
 
     async with aiosqlite.connect(DB_NAME) as db:
+        # Fetch the active dynamic threshold from DB
         async with db.execute("SELECT value FROM bot_stats WHERE key = 'time_threshold'") as cur:
             threshold_seconds_duration = (await cur.fetchone())[0]
             
@@ -197,9 +209,7 @@ def get_main_menu_keyboard():
     return InlineKeyboardMarkup(keyboard)
 
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # UPDATED: Check if user is in the list of ADMIN_IDS
     if update.effective_user.id not in ADMIN_IDS: return
-    
     await update.message.reply_text(
         "👋 Welcome to the Channel Admin Manager Bot.\n\n"
         "Use `/dps <unit> <value>` to set the timer.\n"
@@ -210,7 +220,6 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def dps_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # UPDATED: Check if user is in the list of ADMIN_IDS
     if update.effective_user.id not in ADMIN_IDS: return
 
     args = context.args
@@ -228,14 +237,19 @@ async def dps_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ The value must be a number.")
         return
 
-    if unit in ['day', 'days']: seconds = value * 24 * 3600
-    elif unit in ['hour', 'hours']: seconds = value * 3600
-    elif unit in ['minute', 'minutes', 'min', 'mins']: seconds = value * 60
-    elif unit in ['second', 'seconds', 'sec']: seconds = value
+    if unit in ['day', 'days']:
+        seconds = value * 24 * 3600
+    elif unit in ['hour', 'hours']:
+        seconds = value * 3600
+    elif unit in ['minute', 'minutes', 'min', 'mins']:
+        seconds = value * 60
+    elif unit in ['second', 'seconds', 'sec']:
+        seconds = value
     else:
         await update.message.reply_text("⚠️ Unknown unit. Use `days`, `hours`, `minutes`, or `seconds`.", parse_mode="Markdown")
         return
 
+    # Save the new threshold to the database
     async with aiosqlite.connect(DB_NAME) as db:
         await db.execute("UPDATE bot_stats SET value = ? WHERE key = 'time_threshold'", (seconds,))
         await db.commit()
@@ -245,8 +259,6 @@ async def dps_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    
-    # UPDATED: Check if user is in the list of ADMIN_IDS
     if query.from_user.id not in ADMIN_IDS:
         await query.answer("Not authorized.", show_alert=True)
         return
@@ -310,7 +322,17 @@ def main():
     asyncio.set_event_loop(loop)
     loop.run_until_complete(init_db())
 
-    application = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
+    # Application builder updated with 30 second timeouts to prevent free-tier crashes
+    application = (
+        Application.builder()
+        .token(BOT_TOKEN)
+        .post_init(post_init)
+        .connect_timeout(30.0)
+        .read_timeout(30.0)
+        .write_timeout(30.0)
+        .pool_timeout(30.0)
+        .build()
+    )
 
     application.add_handler(ChatMemberHandler(track_bot_channels, ChatMemberHandler.MY_CHAT_MEMBER))
     application.add_handler(ChatMemberHandler(track_user_joins, ChatMemberHandler.CHAT_MEMBER))
@@ -327,4 +349,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
