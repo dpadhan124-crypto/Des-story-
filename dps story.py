@@ -10,14 +10,13 @@ from pyrogram.enums import ChatMemberStatus
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from aiohttp import web
 
-# --- CONFIGURATION (Use Env Vars for security on Render) ---
+# --- CONFIGURATION ---
+# Using .get() with defaults to prevent crashes if Env Vars are missing
 API_ID = int(os.getenv("API_ID", 28515728))
 API_HASH = os.getenv("API_HASH", "c8df3dfc2cb3cc6b0aa1b6ad6a0f8830")
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8552684809:AAGSRPA-3k0huC9fKBAvJGGI-VYfDhe4RJQ")
 TARGET_GROUP_ID = int(os.getenv("TARGET_GROUP_ID", -1003742470706))
 ADMIN_IDS = [8323137024, 8205396055, 5855151459]
-
-# Render URL for self-pinging
 RENDER_URL = os.getenv("RENDER_URL", "https://des-story-tg.onrender.com/")
 
 DB_NAME = "bot_data.db"
@@ -32,12 +31,15 @@ async def start_web_server():
     server.add_routes([web.get('/', handle_ping)])
     runner = web.AppRunner(server)
     await runner.setup()
+    # Render requires binding to 0.0.0.0 and the PORT env var
     port = int(os.getenv("PORT", "8080"))
     site = web.TCPSite(runner, '0.0.0.0', port)
     await site.start()
     print(f"Web server started on port {port}")
 
 async def ping_self():
+    if "onrender.com" not in RENDER_URL:
+        return
     async with aiohttp.ClientSession() as session:
         try:
             async with session.get(RENDER_URL) as resp:
@@ -99,34 +101,27 @@ async def forwarder(_, message: Message):
     except Exception as e:
         print(f"Forwarding failed: {e}")
 
-async def clean_old_members(client, channel_ids):
-    # Use UTC for consistency
-    limit = datetime.utcnow() - timedelta(days=7)
-    for cid in channel_ids:
-        print(f"Cleaning channel {cid}...")
-        try:
-            async for m in client.get_chat_members(cid):
-                if m.status in [ChatMemberStatus.OWNER, ChatMemberStatus.ADMINISTRATOR]:
-                    continue
-                if m.joined_date and m.joined_date < limit:
-                    try:
-                        await client.ban_chat_member(cid, m.user.id)
-                        await client.unban_chat_member(cid, m.user.id)
-                        await asyncio.sleep(1.5)
-                    except FloodWait as e:
-                        await asyncio.sleep(e.value)
-                    except:
-                        pass
-        except Exception as e:
-            print(f"Error accessing channel {cid}: {e}")
-
 async def auto_job():
     async with aiosqlite.connect(DB_NAME) as db:
         async with db.execute("SELECT channel_id FROM admin_channels") as c:
             rows = await c.fetchall()
             ids = [r[0] for r in rows]
             if ids:
-                await clean_old_members(app, ids)
+                # Basic cleanup logic
+                limit = datetime.utcnow() - timedelta(days=7)
+                for cid in ids:
+                    try:
+                        async for m in app.get_chat_members(cid):
+                            if m.status in [ChatMemberStatus.OWNER, ChatMemberStatus.ADMINISTRATOR]:
+                                continue
+                            if m.joined_date and m.joined_date < limit:
+                                await app.ban_chat_member(cid, m.user.id)
+                                await app.unban_chat_member(cid, m.user.id)
+                                await asyncio.sleep(1)
+                    except FloodWait as e:
+                        await asyncio.sleep(e.value)
+                    except Exception:
+                        continue
 
 # --- ADMIN COMMANDS ---
 @app.on_message(filters.command("stack") & filters.user(ADMIN_IDS))
@@ -145,29 +140,24 @@ async def manual_clean(_, m: Message):
     await m.reply("Starting manual cleanup in the background...")
     asyncio.create_task(auto_job())
 
-# --- MAIN STARTUP ---
-async def start():
+# --- STARTUP ---
+async def main():
     await init_db()
     await start_web_server()
     
     sch = AsyncIOScheduler()
-    # Runs at 2:30 AM every day
     sch.add_job(auto_job, "cron", hour=2, minute=30) 
-    # Pings the URL every 10 minutes to prevent Render from sleeping
     sch.add_job(ping_self, "interval", minutes=10)   
     sch.start()
     
-    print("Bot starting...")
-    # Start the Pyrogram client
+    print("Starting Pyrogram Client...")
     await app.start()
-    print("Bot is alive and running!")
-    
-    # Keeps the script alive indefinitely
+    print("Bot is fully operational!")
     await asyncio.Event().wait()
 
 if __name__ == "__main__":
     try:
-        asyncio.run(start())
-    except KeyboardInterrupt:
+        asyncio.run(main())
+    except (KeyboardInterrupt, SystemExit):
         pass
 
