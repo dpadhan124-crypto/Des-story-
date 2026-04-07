@@ -2,8 +2,10 @@ import asyncio
 import logging
 import time
 import os
+import threading
+import requests
 import aiosqlite
-from aiohttp import web
+from flask import Flask
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -19,7 +21,6 @@ from telegram.error import RetryAfter, BadRequest, Forbidden
 # ==============================================================================
 # CONFIGURATION VARIABLES
 # ==============================================================================
-# REMEMBER TO REVOKE THIS TOKEN AFTER DEPLOYMENT AND UPDATE IT IN RENDER!
 BOT_TOKEN = os.environ.get('BOT_TOKEN', '8749988449:AAGROgxIJbDMTJJE5AOBki8TvLC74QjPhLo') 
 
 # Parses comma-separated IDs from Render Env variables, or uses your default list
@@ -27,6 +28,7 @@ admin_env = os.environ.get('ADMIN_IDS', '8323137024, 8205396055, 5855151459')
 ADMIN_IDS = [int(x.strip()) for x in admin_env.split(',')]
 
 DB_NAME = 'channel_admin_bot.db'
+RENDER_EXTERNAL_URL = "https://des-story-tg.onrender.com"
 
 # ==============================================================================
 # LOGGING SETUP
@@ -35,39 +37,32 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
 logger = logging.getLogger(__name__)
-
-# Silence the spammy httpx logs from python-telegram-bot
 logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("werkzeug").setLevel(logging.WARNING) # Silence Flask logs
 
 # ==============================================================================
-# KEEP-ALIVE WEB SERVER (For Render 24/7 Uptime)
+# KEEP-ALIVE WEB SERVER & PINGER (Flask + Threading)
 # ==============================================================================
-async def web_server_handler(request):
-    """Answers incoming HTTP pings to keep the bot awake."""
-    return web.Response(text="Bot is running 24/7!")
+flask_app = Flask('')
 
-async def start_web_server():
-    """Starts a minimal web server asynchronously."""
-    app = web.Application()
-    app.router.add_get('/', web_server_handler)
-    runner = web.AppRunner(app)
-    await runner.setup()
-    
-    # Render assigns a dynamic port, defaulting to 8080 locally
-    port = int(os.environ.get("PORT", 8080))
-    site = web.TCPSite(runner, '0.0.0.0', port)
-    await site.start()
-    logger.info(f"Keep-alive web server started on port {port}")
+@flask_app.route('/')
+def home(): 
+    return "Bot is running 24/7!"
 
-async def post_init(application: Application):
-    """Runs automatically when the bot starts to boot up the web server."""
-    asyncio.create_task(start_web_server())
+def ping_self():
+    """Pings the Render URL every 14 minutes to prevent sleep."""
+    while True:
+        try: 
+            requests.get(RENDER_EXTERNAL_URL)
+            logger.info("Self-ping successful.")
+        except Exception as e: 
+            logger.error(f"Self-ping failed: {e}")
+        time.sleep(840) # 840 seconds = 14 minutes
 
 # ==============================================================================
 # DATABASE SETUP & HELPERS
 # ==============================================================================
 async def init_db():
-    """Initializes the SQLite database asynchronously."""
     async with aiosqlite.connect(DB_NAME) as db:
         await db.execute("""
             CREATE TABLE IF NOT EXISTS tracked_users (
@@ -90,8 +85,6 @@ async def init_db():
             )
         """)
         await db.execute("INSERT OR IGNORE INTO bot_stats (key, value) VALUES ('total_kicked', 0)")
-        
-        # Default timer is 7 days (604800 seconds) if not set yet
         await db.execute("INSERT OR IGNORE INTO bot_stats (key, value) VALUES ('time_threshold', 604800)")
         await db.commit()
 
@@ -162,7 +155,6 @@ async def cleanup_job(context: ContextTypes.DEFAULT_TYPE, manual=False):
     kicked_count_this_run = 0
 
     async with aiosqlite.connect(DB_NAME) as db:
-        # Fetch the active dynamic threshold from DB
         async with db.execute("SELECT value FROM bot_stats WHERE key = 'time_threshold'") as cur:
             threshold_seconds_duration = (await cur.fetchone())[0]
             
@@ -237,25 +229,19 @@ async def dps_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ The value must be a number.")
         return
 
-    if unit in ['day', 'days']:
-        seconds = value * 24 * 3600
-    elif unit in ['hour', 'hours']:
-        seconds = value * 3600
-    elif unit in ['minute', 'minutes', 'min', 'mins']:
-        seconds = value * 60
-    elif unit in ['second', 'seconds', 'sec']:
-        seconds = value
+    if unit in ['day', 'days']: seconds = value * 24 * 3600
+    elif unit in ['hour', 'hours']: seconds = value * 3600
+    elif unit in ['minute', 'minutes', 'min', 'mins']: seconds = value * 60
+    elif unit in ['second', 'seconds', 'sec']: seconds = value
     else:
         await update.message.reply_text("⚠️ Unknown unit. Use `days`, `hours`, `minutes`, or `seconds`.", parse_mode="Markdown")
         return
 
-    # Save the new threshold to the database
     async with aiosqlite.connect(DB_NAME) as db:
         await db.execute("UPDATE bot_stats SET value = ? WHERE key = 'time_threshold'", (seconds,))
         await db.commit()
 
     await update.message.reply_text(f"✅ Auto-kick timer successfully updated to **{value} {unit}**.", parse_mode="Markdown")
-
 
 async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -318,15 +304,22 @@ async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
 # MAIN 
 # ==============================================================================
 def main():
+    # Initialize the SQLite DB
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     loop.run_until_complete(init_db())
 
-    # Application builder updated with 30 second timeouts to prevent free-tier crashes
+    # Start Flask Web Server in a background thread
+    port = int(os.environ.get("PORT", 8080))
+    threading.Thread(target=lambda: flask_app.run(host='0.0.0.0', port=port), daemon=True).start()
+    
+    # Start the Self-Pinger in a background thread
+    threading.Thread(target=ping_self, daemon=True).start()
+
+    # Build the application with 30-second timeouts
     application = (
         Application.builder()
         .token(BOT_TOKEN)
-        .post_init(post_init)
         .connect_timeout(30.0)
         .read_timeout(30.0)
         .write_timeout(30.0)
@@ -344,8 +337,9 @@ def main():
     job_queue = application.job_queue
     job_queue.run_repeating(cleanup_job, interval=60, first=10)
 
-    logger.info("Bot is polling...")
+    logger.info("Bot is polling and pinging itself 24/7...")
     application.run_polling(allowed_updates=[Update.MESSAGE, Update.CHAT_MEMBER, Update.MY_CHAT_MEMBER, Update.CALLBACK_QUERY])
 
 if __name__ == "__main__":
     main()
+
