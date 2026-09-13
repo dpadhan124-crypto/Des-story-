@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Production Ready Story Cards</title>
+    <style>
+        :root {
+            /* Modern Dark Theme Colors */
+            --bg-color: #121212;
+            --card-bg: #1e1e24;
+            --primary: #bb86fc;
+            --secondary: #03dac6;
+            --accent: #6200ee;
+            --text-main: #ffffff;
+            --text-muted: #a0a0a0;
+            --border-color: #333333;
+            --btn-bg: #2d2d35;
+            --btn-hover: #3d3d48;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            margin: 0;
+            padding: 20px;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding: 15px;
+            background: var(--card-bg);
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+            border: 1px solid var(--border-color);
+        }
+
+        .search-bar {
+            flex: 1;
+            margin-right: 20px;
+        }
+
+        .search-bar input {
+            width: 90%;
+            padding: 10px 15px;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            border: 1px solid var(--border-color);
+            border-radius: 20px;
+            font-size: 16px;
+            outline: none;
+            transition: border-color 0.3s;
+        }
+
+        .search-bar input::placeholder {
+            color: var(--text-muted);
+        }
+
+        .search-bar input:focus {
+            border-color: var(--primary);
+        }
+
+        .settings-btn {
+            background-color: var(--accent);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+            transition: background-color 0.3s;
+        }
+
+        .settings-btn:hover {
+            background-color: var(--primary);
+        }
+
+        .settings-panel {
+            display: none;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            padding: 20px;
+            background: var(--card-bg);
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+            border: 1px solid var(--border-color);
+        }
+
+        .settings-panel.active {
+            display: grid;
+        }
+
+        .setting-group {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .setting-group label {
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 5px;
+            color: var(--secondary);
+        }
+
+        .setting-group select, .setting-group input {
+            padding: 8px;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            font-size: 14px;
+            outline: none;
+        }
+
+        .setting-group select:focus, .setting-group input:focus {
+            border-color: var(--primary);
+        }
+
+        .card-container {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .card {
+            background: var(--card-bg);
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+            border-left: 5px solid var(--primary);
+            border-top: 1px solid var(--border-color);
+            border-right: 1px solid var(--border-color);
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .card-title {
+            margin: 0 0 15px 0;
+            color: var(--text-main);
+            font-size: 20px;
+        }
+
+        .card-buttons {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .action-btn {
+            display: inline-block;
+            background-color: var(--btn-bg);
+            color: var(--secondary);
+            border: 1px solid var(--border-color);
+            padding: 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: all 0.2s;
+            text-align: center;
+            text-decoration: none;
+        }
+
+        .action-btn:hover {
+            background-color: var(--btn-hover);
+            color: var(--primary);
+            border-color: var(--primary);
+        }
+
+        .pagination {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 15px;
+            margin-top: 30px;
+        }
+
+        .page-btn {
+            padding: 8px 15px;
+            border: 1px solid var(--primary);
+            background: transparent;
+            color: var(--primary);
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: all 0.2s;
+        }
+
+        .page-btn.active, .page-btn:hover:not(:disabled) {
+            background: var(--primary);
+            color: #000;
+        }
+        
+        .page-btn:disabled {
+            border-color: var(--border-color);
+            color: var(--text-muted);
+            cursor: not-allowed;
+        }
+
+        #noResults {
+            text-align: center;
+            padding: 40px;
+            color: var(--text-muted);
+            display: none;
+            font-size: 18px;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <div class="search-bar">
+            <input type="text" id="searchInput" placeholder="Search stories by title...">
+        </div>
+        <button class="settings-btn" id="toggleSettings">⚙️ Settings</button>
+    </div>
+
+    <div class="settings-panel" id="settingsPanel">
+        <div class="setting-group">
+            <label>Channel ID</label>
+            <input type="text" id="channelIdInput" value="YOUR_CHANNEL_ID">
+        </div>
+        <div class="setting-group">
+            <label>Access</label>
+            <select id="accessSelect">
+                <option value="Free">Free</option>
+                <option value="Verify">Verify</option>
+                <option value="Premium">Premium</option>
+            </select>
+        </div>
+        <div class="setting-group">
+            <label>Status</label>
+            <select id="statusSelect">
+                <option value="Completed">Completed</option>
+                <option value="Ongoing">Ongoing</option>
+            </select>
+        </div>
+        <div class="setting-group">
+            <label>Category</label>
+            <select id="categorySelect">
+                <option value="Real Voice">Real Voice</option>
+                <option value="AI Voice">AI Voice</option>
+            </select>
+        </div>
+        <div class="setting-group">
+            <label>Type</label>
+            <select id="typeSelect">
+                <option value="Type 1">audio story</option>
+                <option value="Type 2">short drama</option>
+            </select>
+        </div>
+    </div>
+
+    <div id="noResults">No stories found matching your criteria.</div>
+    <div class="card-container" id="cardContainer"></div>
+    <div class="pagination" id="paginationContainer"></div>
+
+    <script>
+        let allData = [];
+        let filteredData = [];
+        let currentPage = 1;
+        const itemsPerPage = 10;
+
+        // --- LOCAL STORAGE SETTINGS LOGIC ---
+        function loadSettings() {
+            const savedSettings = localStorage.getItem('storyCardSettings');
+            if (savedSettings) {
+                const settings = JSON.parse(savedSettings);
+                if (settings.channelId) document.getElementById('channelIdInput').value = settings.channelId;
+                if (settings.access) document.getElementById('accessSelect').value = settings.access;
+                if (settings.status) document.getElementById('statusSelect').value = settings.status;
+                if (settings.category) document.getElementById('categorySelect').value = settings.category;
+                if (settings.type) document.getElementById('typeSelect').value = settings.type;
+            }
+        }
+
+        function saveSettings() {
+            const settings = {
+                channelId: document.getElementById('channelIdInput').value,
+                access: document.getElementById('accessSelect').value,
+                status: document.getElementById('statusSelect').value,
+                category: document.getElementById('categorySelect').value,
+                type: document.getElementById('typeSelect').value
+            };
+            localStorage.setItem('storyCardSettings', JSON.stringify(settings));
+        }
+
+        // Load settings immediately on startup
+        loadSettings();
+
+        // Fetch JSON data
+        fetch('cleaned_output.json')
+            .then(response => response.json())
+            .then(data => {
+                allData = data.filter(item => item.title);
+                filteredData = [...allData];
+                renderPage();
+            })
+            .catch(error => {
+                console.error('Error loading JSON:', error);
+                // Fallback dummy data for previewing without JSON
+                allData = [{ title: "Sample Story", e: "5", direct_link: "#", extra_link: "#", channel_id: "CH_001", g: "Action", d: "A great adventure in the dark theme." }];
+                filteredData = [...allData];
+                renderPage();
+            });
+
+        // Settings Toggle
+        document.getElementById('toggleSettings').addEventListener('click', () => {
+            document.getElementById('settingsPanel').classList.toggle('active');
+        });
+
+        // Search Functionality
+        document.getElementById('searchInput').addEventListener('input', (e) => {
+            const searchTerm = e.target.value.toLowerCase();
+            filteredData = allData.filter(item => 
+                item.title.toLowerCase().includes(searchTerm)
+            );
+            currentPage = 1;
+            renderPage();
+        });
+
+        // Event listeners for settings to save data and regenerate links dynamically
+        const settingsInputs = ['channelIdInput', 'accessSelect', 'statusSelect', 'categorySelect', 'typeSelect'];
+        settingsInputs.forEach(id => {
+            document.getElementById(id).addEventListener('change', () => {
+                saveSettings(); // Save to local database
+                renderPage();   // Update UI
+            });
+        });
+
+        // Copy function
+        function copyToClipboard(button, text) {
+            const originalText = button.textContent;
+            navigator.clipboard.writeText(text).then(() => {
+                button.textContent = 'Copied!';
+                button.style.backgroundColor = 'var(--secondary)';
+                button.style.color = '#000';
+                setTimeout(() => {
+                    button.textContent = originalText;
+                    button.style.backgroundColor = '';
+                    button.style.color = '';
+                }, 1500);
+            });
+        }
+
+        // Global click listener for copy buttons
+        document.getElementById('cardContainer').addEventListener('click', (e) => {
+            if (e.target.classList.contains('copy-btn')) {
+                const textToCopy = decodeURIComponent(e.target.getAttribute('data-text'));
+                copyToClipboard(e.target, textToCopy);
+            }
+        });
+
+        function renderPage() {
+            const container = document.getElementById('cardContainer');
+            const noResults = document.getElementById('noResults');
+            container.innerHTML = '';
+
+            if (filteredData.length === 0) {
+                noResults.style.display = 'block';
+                document.getElementById('paginationContainer').innerHTML = '';
+                return;
+            }
+            noResults.style.display = 'none';
+
+            const start = (currentPage - 1) * itemsPerPage;
+            const end = start + itemsPerPage;
+            const pageData = filteredData.slice(start, end);
+
+            // Get current settings
+            const channelId = document.getElementById('channelIdInput').value;
+            const access = document.getElementById('accessSelect').value;
+            const status = document.getElementById('statusSelect').value;
+            const category = document.getElementById('categorySelect').value;
+            const type = document.getElementById('typeSelect').value;
+
+            pageData.forEach(item => {
+                const title = item.title || 'Unknown Title';
+                const episodes = item.e || 'N/A';
+                const mylink = item.direct_link || '#';
+                const chlink = item.extra_link || '#';
+                const chid = item.channel_id || channelId;
+                const genre = item.g || 'N/A';
+                const description = item.d || 'N/A';
+
+                // FIXED: Changed single quotes to backticks (`) for multi-line string interpolation
+                const posterPrompt = `Create a square promotional poster for an audio-drama series.
+Text to write on poster (ensure all text is clearly legible, bold, and not too small, maintaining this strict visual hierarchy):
+ * Primary Focus (Largest): The title "${title}" dominating the layout.
+ * Secondary Focus: A prominent, easily readable signature reading "DPS Stories".
+ * Tertiary Focus: "Total Episode {episodes}", "{genre}" and "${status}" displayed clearly as supporting text elements.
+Visual Context & Scene (CRITICAL: Do NOT write this description text on the poster. Use this ONLY to inspire the visual elements, characters, and mood): ${description}
+Art Style & Design: Allow the AI to freely determine the best artistic medium, visual style, typography design, lighting, and compositional layout to perfectly match the mood of the provided scene and genre.
+Typography layout: Integrate the requested text elements seamlessly into the design ensuring they are adequately sized for readability. Keep the rest of the image completely free of unrequested text.
+--ar 1:1 --v 6.0 `;
+
+                const botText = `Channel id: ${chid}
+Episodes: ${episodes}
+Genre: ${genre}
+Access: ${access}
+Category: ${category}
+Type: ${type}
+Status: ${status}
+Description: ${description}
+More info: N/A`;
+
+                const teleLink = `https://t.me/dps_xbot?text=${encodeURIComponent(botText)}`;
+
+                const card = document.createElement('div');
+                card.className = 'card';
+                card.innerHTML = `
+                    <h3 class="card-title">${title}</h3>
+                    <div class="card-buttons">
+                        <button class="action-btn copy-btn" data-text="${encodeURIComponent(posterPrompt)}">1. Poster Prompt</button>
+                        <a class="action-btn" href="${teleLink}" target="_blank">2. Telegram Link</a>
+                        <a class="action-btn" href="${mylink}" target="_blank">3. My Channel</a>
+                        <a class="action-btn" href="${chlink}" target="_blank">4. Mota Bhai</a>
+                    </div>
+                `;
+                container.appendChild(card);
+            });
+
+            renderPagination();
+        }
+
+        function renderPagination() {
+            const paginationContainer = document.getElementById('paginationContainer');
+            paginationContainer.innerHTML = '';
+            
+            const totalPages = Math.ceil(filteredData.length / itemsPerPage);
+            if (totalPages <= 1) return;
+
+            const prevBtn = document.createElement('button');
+            prevBtn.className = 'page-btn';
+            prevBtn.textContent = 'Previous';
+            prevBtn.disabled = currentPage === 1;
+            prevBtn.onclick = () => {
+                if (currentPage > 1) {
+                    currentPage--;
+                    renderPage();
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                }
+            };
+            paginationContainer.appendChild(prevBtn);
+
+            const indicator = document.createElement('span');
+            indicator.style.color = 'var(--text-muted)';
+            indicator.textContent = `Page ${currentPage} of ${totalPages}`;
+            paginationContainer.appendChild(indicator);
+
+            const nextBtn = document.createElement('button');
+            nextBtn.className = 'page-btn';
+            nextBtn.textContent = 'Next';
+            nextBtn.disabled = currentPage === totalPages;
+            nextBtn.onclick = () => {
+                if (currentPage < totalPages) {
+                    currentPage++;
+                    renderPage();
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                }
+            };
+            paginationContainer.appendChild(nextBtn);
+        }
+    </script>
+
+</body>
+</html>
