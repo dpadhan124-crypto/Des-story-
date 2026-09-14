@@ -250,9 +250,10 @@
         </div>
         <div class="setting-group">
             <label>Type</label>
+            <!-- FIXED: Changed values so the actual text gets output correctly in links/prompts -->
             <select id="typeSelect">
-                <option value="Type 1">audio story</option>
-                <option value="Type 2">short drama</option>
+                <option value="Audio Story">Audio Story</option>
+                <option value="Short Drama">Short Drama</option>
             </select>
         </div>
     </div>
@@ -386,15 +387,15 @@
                 const mylink = item.direct_link || '#';
                 const chlink = item.extra_link || '#';
                 const chid = item.channel_id || channelId;
-                const genre = item.g || 'N/A';
+                // FIXED: Defaulting to "General" instead of N/A for better text/image generation
+                const genre = item.g || 'General'; 
                 const description = item.d || 'N/A';
 
-                // FIXED: Changed single quotes to backticks (`) for multi-line string interpolation
                 const posterPrompt = `Create a square promotional poster for an audio-drama series.
 Text to write on poster (ensure all text is clearly legible, bold, and not too small, maintaining this strict visual hierarchy):
  * Primary Focus (Largest): The title "${title}" dominating the layout.
  * Secondary Focus: A prominent, easily readable signature reading "DPS Stories".
- * Tertiary Focus: "Total Episode {episodes}", "{genre}" and "${status}" displayed clearly as supporting text elements.
+ * Tertiary Focus: "Total Episode ${episodes}", "${genre}" and "${status}" displayed clearly as supporting text elements.
 Visual Context & Scene (CRITICAL: Do NOT write this description text on the poster. Use this ONLY to inspire the visual elements, characters, and mood): ${description}
 Art Style & Design: Allow the AI to freely determine the best artistic medium, visual style, typography design, lighting, and compositional layout to perfectly match the mood of the provided scene and genre.
 Typography layout: Integrate the requested text elements seamlessly into the design ensuring they are adequately sized for readability. Keep the rest of the image completely free of unrequested text.
